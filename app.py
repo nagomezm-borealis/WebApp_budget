@@ -250,9 +250,8 @@ with tab_summary:
     c5.metric("Valentina ratio", f"{summary['valentina_ratio'] * 100:.2f}%")
 
     st.markdown("### Final payment suggestion")
-    a1, a2 = st.columns(2)
+    a1, = st.columns(1)
     a1.metric("Noel pays", f"EUR {summary['noel_final_payment']:.2f}")
-    a2.metric("Valentina pays", f"EUR {summary['valentina_final_payment']:.2f}")
 
     st.caption(
         "Rule: half child support is deducted from the non-receiver; JobRad is deducted from Noel's final payment."
