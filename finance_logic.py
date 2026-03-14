@@ -44,7 +44,7 @@ EXPENSE_LABELS: Dict[str, str] = {
     "internet_bill": "Internet bill",
     "orf": "ORF",
     "nebenkosten": "Nebenkosten",
-    "jobrad": "JobRad (Noel)",
+    "jobrad": "JobRad",
 }
 
 
@@ -100,7 +100,7 @@ def compute_summary(payload: Dict[str, object]) -> Dict[str, float]:
         elif is_valentina_receiver:
             noel_adjustment -= half_support
 
-    # Noel-specific JobRad payment reduces Noel's final amount to pay.
+    # JobRad payment reduces Noel's final amount to pay.
     noel_adjustment -= jobrad
 
     noel_final = _safe(max(0.0, noel_target + noel_adjustment))
