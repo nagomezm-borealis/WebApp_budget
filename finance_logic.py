@@ -36,7 +36,7 @@ EXPENSE_LABELS: Dict[str, str] = {
     "accident_insurance": "Accidents",
     "house_insurance": "House",
     "legal_insurance": "Legal",
-    "emma_private_health_insurance": "Emma PVH",
+    "emma_private_health_insurance": "Emma PHI",
     "emma_savings_account": "Emma savings account",
     "kindergarten": "Kindergarten",
     "rent": "Rent",
