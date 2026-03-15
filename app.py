@@ -12,7 +12,6 @@ from finance_logic import (
     EXPENSE_CATEGORIES,
     EXPENSE_LABELS,
     VARIABLE_COST_CATEGORIES,
-    VARIABLE_COST_KEYS,
     compute_summary,
 )
 from storage import (
@@ -21,8 +20,9 @@ from storage import (
     load_month_record,
     upsert_month,
     init_variable_costs_table,
-    upsert_variable_costs,
-    load_variable_costs,
+    init_variable_expense_items_table,
+    upsert_variable_expense_items,
+    load_variable_expense_items,
 )
 
 
@@ -33,6 +33,7 @@ st.caption("Track monthly income, fixed expenses, and settlement amounts.")
 base_dir = Path(__file__).parent.resolve()
 db_path = init_db(base_dir)
 init_variable_costs_table(db_path)
+init_variable_expense_items_table(db_path)
 
 EXPENSE_FIELDS = [
     "car_lease",
@@ -75,9 +76,8 @@ def _set_form_defaults() -> None:
     }
     for key in EXPENSE_FIELDS:
         defaults[f"expense_{key}"] = 0.0
-    for vc_key in VARIABLE_COST_KEYS:
-        for person in ("noel", "valentina", "joint"):
-            defaults[f"vc_{vc_key}_{person}"] = 0.0
+    defaults["vc_items"] = []
+
 
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -143,18 +143,12 @@ def _apply_month_to_session(row: "pd.Series", month_key: str | None = None) -> N
     )
     for key in EXPENSE_FIELDS:
         st.session_state[f"expense_{key}"] = _to_float(row.get(key, 0.0))
-    # Reset all variable cost fields to zero before loading saved values.
-    for vc_key in VARIABLE_COST_KEYS:
-        for person in ("noel", "valentina", "joint"):
-            st.session_state[f"vc_{vc_key}_{person}"] = 0.0
+    # Reset variable expense items, then load saved items for this month.
+    st.session_state["vc_items"] = []
     if month_key:
-        vc_df = load_variable_costs(db_path, month_key)
-        for _, vc_row in vc_df.iterrows():
-            cat = str(vc_row["category"])
-            if cat in VARIABLE_COST_KEYS:
-                st.session_state[f"vc_{cat}_noel"] = _to_float(vc_row.get("noel_amount", 0.0))
-                st.session_state[f"vc_{cat}_valentina"] = _to_float(vc_row.get("valentina_amount", 0.0))
-                st.session_state[f"vc_{cat}_joint"] = _to_float(vc_row.get("joint_amount", 0.0))
+        vc_items_df = load_variable_expense_items(db_path, month_key)
+        if not vc_items_df.empty:
+            st.session_state["vc_items"] = vc_items_df[["description", "category", "amount"]].to_dict("records")
 
 
 _set_form_defaults()
@@ -249,27 +243,67 @@ with tab_expenses:
 with tab_variable_costs:
     st.subheader("Variable costs")
     st.caption(
-        "Track personal and household variable expenses by category. "
-        "These are for your own records only and do not affect the shared expense split."
+        "Track household variable expenses. These are for your own records only "
+        "and do not affect the shared expense split."
     )
 
-    vc_grand_total = 0.0
-    for vc_key, vc_label in VARIABLE_COST_CATEGORIES.items():
-        vc_noel = st.session_state.get(f"vc_{vc_key}_noel", 0.0)
-        vc_valentina = st.session_state.get(f"vc_{vc_key}_valentina", 0.0)
-        vc_joint = st.session_state.get(f"vc_{vc_key}_joint", 0.0)
-        vc_cat_total = vc_noel + vc_valentina + vc_joint
-        vc_grand_total += vc_cat_total
-        with st.expander(f"{vc_label} — EUR {vc_cat_total:.2f}", expanded=False):
-            vc_col1, vc_col2, vc_col3 = st.columns(3)
-            with vc_col1:
-                st.number_input("Noel", min_value=0.0, step=10.0, key=f"vc_{vc_key}_noel")
-            with vc_col2:
-                st.number_input("Valentina", min_value=0.0, step=10.0, key=f"vc_{vc_key}_valentina")
-            with vc_col3:
-                st.number_input("Joint", min_value=0.0, step=10.0, key=f"vc_{vc_key}_joint")
+    st.markdown("### Add expense")
+    with st.form("vc_add_form", clear_on_submit=True):
+        vc_col1, vc_col2, vc_col3 = st.columns([3, 2, 1.5])
+        with vc_col1:
+            vc_new_desc = st.text_input("Description", placeholder="e.g. Supermarket")
+        with vc_col2:
+            vc_new_cat = st.selectbox(
+                "Category",
+                options=list(VARIABLE_COST_CATEGORIES.values()),
+            )
+        with vc_col3:
+            vc_new_amount = st.number_input("Amount (EUR)", min_value=0.0, step=1.0)
 
-    st.metric("Total variable costs", f"EUR {vc_grand_total:.2f}")
+        vc_submitted = st.form_submit_button("Add expense", type="primary")
+
+    if vc_submitted:
+        if vc_new_amount > 0:
+            st.session_state["vc_items"].append({
+                "description": vc_new_desc,
+                "category": vc_new_cat,
+                "amount": vc_new_amount,
+            })
+            st.rerun()
+        else:
+            st.warning("Please enter an amount greater than zero.")
+
+    vc_items = st.session_state.get("vc_items", [])
+    if vc_items:
+        st.markdown("### Expenses this month")
+        for i, item in enumerate(list(vc_items)):
+            ic1, ic2, ic3, ic4 = st.columns([3, 2, 1.5, 0.5])
+            with ic1:
+                st.write(item.get("description") or "—")
+            with ic2:
+                st.write(item.get("category", ""))
+            with ic3:
+                st.write(f"EUR {item['amount']:.2f}")
+            with ic4:
+                if st.button("×", key=f"vc_del_{i}", help="Remove this expense"):
+                    st.session_state["vc_items"].pop(i)
+                    st.rerun()
+        vc_grand_total = sum(item["amount"] for item in vc_items)
+        st.metric("Total variable costs", f"EUR {vc_grand_total:.2f}")
+
+        st.markdown("### Breakdown by category")
+        vc_pie_by_cat: dict[str, float] = {}
+        for item in vc_items:
+            cat = str(item.get("category", ""))
+            if cat:
+                vc_pie_by_cat[cat] = vc_pie_by_cat.get(cat, 0.0) + float(item.get("amount", 0.0))
+        vc_pie_df = pd.DataFrame(
+            {"Category": list(vc_pie_by_cat.keys()), "Amount": list(vc_pie_by_cat.values())}
+        )
+        vc_pie_fig = px.pie(vc_pie_df, values="Amount", names="Category")
+        st.plotly_chart(vc_pie_fig, use_container_width=True)
+    else:
+        st.info("No variable expenses added yet for this month.")
 
 payload = {
     "noel_net_salary": noel_net_salary,
@@ -309,15 +343,7 @@ with tab_summary:
         else:
             record = _build_record_from_inputs(month_key, payload, expenses)
             upsert_month(db_path, record)
-            vc_data = {
-                vc_key: {
-                    "noel": st.session_state.get(f"vc_{vc_key}_noel", 0.0),
-                    "valentina": st.session_state.get(f"vc_{vc_key}_valentina", 0.0),
-                    "joint": st.session_state.get(f"vc_{vc_key}_joint", 0.0),
-                }
-                for vc_key in VARIABLE_COST_KEYS
-            }
-            upsert_variable_costs(db_path, month_key, vc_data)
+            upsert_variable_expense_items(db_path, month_key, st.session_state.get("vc_items", []))
             st.toast(f"Saved {month_key}.")
             st.rerun()
 
@@ -330,16 +356,16 @@ with tab_summary:
         if cat_total > 0:
             pie_labels.append(category)
             pie_values.append(cat_total)
-    # Variable cost categories
-    for vc_key, vc_label in VARIABLE_COST_CATEGORIES.items():
-        vc_total = (
-            st.session_state.get(f"vc_{vc_key}_noel", 0.0)
-            + st.session_state.get(f"vc_{vc_key}_valentina", 0.0)
-            + st.session_state.get(f"vc_{vc_key}_joint", 0.0)
-        )
+    # Variable cost categories (aggregated from individual items)
+    vc_by_cat: dict[str, float] = {}
+    for item in st.session_state.get("vc_items", []):
+        cat_label = str(item.get("category", ""))
+        if cat_label:
+            vc_by_cat[cat_label] = vc_by_cat.get(cat_label, 0.0) + float(item.get("amount", 0.0))
+    for cat_label, vc_total in vc_by_cat.items():
         if vc_total > 0:
-            pie_labels.append(vc_label)
-            pie_values.append(float(vc_total))
+            pie_labels.append(cat_label)
+            pie_values.append(vc_total)
     if pie_values:
         summary_pie_df = pd.DataFrame({"Category": pie_labels, "Amount": pie_values})
         summary_pie_fig = px.pie(

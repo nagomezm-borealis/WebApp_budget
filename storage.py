@@ -232,4 +232,54 @@ def load_variable_costs(db_path: Path, month: str) -> pd.DataFrame:
             conn,
             params=[month],
         )
+
+
+# ---------------------------------------------------------------------------
+# Variable expense items (individual line items)
+# ---------------------------------------------------------------------------
+
+
+def init_variable_expense_items_table(db_path: Path) -> None:
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS variable_expense_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                month TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0.0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vei_month ON variable_expense_items (month)"
+        )
+
+
+def upsert_variable_expense_items(db_path: Path, month: str, items: list) -> None:
+    """Replace all variable expense items for the given month with the provided list."""
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM variable_expense_items WHERE month = ?", (month,))
+        conn.executemany(
+            "INSERT INTO variable_expense_items (month, description, category, amount) VALUES (?, ?, ?, ?)",
+            [
+                (
+                    month,
+                    str(item.get("description", "")),
+                    str(item.get("category", "")),
+                    float(item.get("amount", 0.0)),
+                )
+                for item in items
+            ],
+        )
+
+
+def load_variable_expense_items(db_path: Path, month: str) -> pd.DataFrame:
+    with _connect(db_path) as conn:
+        return pd.read_sql_query(
+            "SELECT description, category, amount FROM variable_expense_items WHERE month = ? ORDER BY id ASC",
+            conn,
+            params=[month],
+        )
     return df
