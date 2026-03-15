@@ -124,8 +124,8 @@ def compute_summary(payload: Dict[str, object]) -> Dict[str, float]:
     # Noel-specific JobRad payment reduces Noel's final amount to pay.
     noel_adjustment -= jobrad
 
-    noel_final = _safe(max(0.0, noel_target + noel_adjustment))
-    val_final = _safe(max(0.0, val_target + val_adjustment))
+    noel_final = _safe(noel_target + noel_adjustment)
+    val_final = _safe(val_target + val_adjustment)
 
     return {
         "noel_income": _safe(noel_income),

@@ -34,6 +34,7 @@ base_dir = Path(__file__).parent.resolve()
 db_path = init_db(base_dir)
 init_variable_costs_table(db_path)
 init_variable_expense_items_table(db_path)
+df = load_all_months(db_path)
 
 EXPENSE_FIELDS = [
     "car_lease",
@@ -179,11 +180,10 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("Saved months:")
-    _saved_months_df = load_all_months(db_path)
-    if _saved_months_df.empty:
+    if df.empty:
         st.caption("No saved months yet.")
     else:
-        for _m in reversed(_saved_months_df["month"].tolist()):
+        for _m in reversed(df["month"].tolist()):
             st.text(_m)
 
 
@@ -329,8 +329,9 @@ with tab_summary:
     c5.metric("Valentina ratio", f"{summary['valentina_ratio'] * 100:.2f}%")
 
     st.markdown("### Final payment suggestion")
-    a1, = st.columns(1)
+    a1, a2 = st.columns(2)
     a1.metric("Noel pays", f"EUR {summary['noel_final_payment']:.2f}")
+    a2.metric("Valentina pays", f"EUR {summary['valentina_final_payment']:.2f}")
 
     st.caption(
         "Rule: half child support is deducted from the non-receiver; JobRad is deducted from Noel's final payment."
@@ -380,7 +381,6 @@ with tab_summary:
 
 with tab_history:
     st.subheader("Historical view")
-    df = load_all_months(db_path)
 
     st.markdown("### Backup and migration")
     if df.empty:

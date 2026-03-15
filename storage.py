@@ -282,4 +282,3 @@ def load_variable_expense_items(db_path: Path, month: str) -> pd.DataFrame:
             conn,
             params=[month],
         )
-    return df
