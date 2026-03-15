@@ -20,13 +20,9 @@ from storage import (
     load_all_months,
     load_month_record,
     upsert_month,
-    init_debt_table,
-    upsert_debt_payment,
-    load_debt_payments,
     init_variable_costs_table,
     upsert_variable_costs,
     load_variable_costs,
-    DEBT_OPENING_BALANCE,
 )
 
 
@@ -36,7 +32,6 @@ st.caption("Track monthly income, fixed expenses, and settlement amounts.")
 
 base_dir = Path(__file__).parent.resolve()
 db_path = init_db(base_dir)
-init_debt_table(db_path)
 init_variable_costs_table(db_path)
 
 EXPENSE_FIELDS = [
@@ -198,8 +193,8 @@ with st.sidebar:
             st.text(_m)
 
 
-tab_income, tab_expenses, tab_variable_costs, tab_summary, tab_history, tab_debt = st.tabs(
-    ["Monthly income", "Fixed monthly expenses", "Variable costs", "Monthly summary", "History & charts", "Debt tracker"]
+tab_income, tab_expenses, tab_variable_costs, tab_summary, tab_history = st.tabs(
+    ["Monthly income", "Fixed monthly expenses", "Variable costs", "Monthly summary", "History & charts"]
 )
 
 with tab_income:
@@ -459,96 +454,3 @@ with tab_history:
 
         st.markdown("### Saved records")
         st.dataframe(df, use_container_width=True)
-
-with tab_debt:
-    st.subheader("Noel \u2194 Valentina — debt tracker")
-    st.caption(
-        "Tracks the running balance Noel owes Valentina. "
-        "Each month's debt reduction = Noel's actual payment \u2212 his budget share."
-    )
-
-    debt_df = load_debt_payments(db_path)
-    current_balance = (
-        float(debt_df.iloc[-1]["balance"]) if not debt_df.empty else DEBT_OPENING_BALANCE
-    )
-
-    st.metric("Current balance (Noel owes Valentina)", f"EUR {current_balance:,.2f}")
-
-    st.markdown("### Log a payment")
-
-    dp_month = st.text_input("Month (YYYY-MM)", value=month_default(), key="dp_month")
-    dp_month_key = _normalize_month(dp_month) if dp_month else None
-    if dp_month and dp_month_key is None:
-        st.error("Invalid month format. Use YYYY-MM (example: 2026-03).")
-
-    # Auto-load the budget share for the selected month if a record exists.
-    budget_share: float = 0.0
-    has_budget_record = False
-    if dp_month_key:
-        _br = load_month_record(db_path, dp_month_key)
-        if not _br.empty:
-            budget_share = float(_br.iloc[0]["noel_final_payment"])
-            has_budget_record = True
-
-    dp_col1, dp_col2 = st.columns(2)
-    with dp_col1:
-        st.metric(
-            "Budget share (Noel)",
-            f"EUR {budget_share:.2f}",
-            help="Noel's computed share from the monthly budget analysis for this month.",
-        )
-        if dp_month_key and not has_budget_record:
-            st.caption("No budget record for this month — full payment counted as debt reduction.")
-    with dp_col2:
-        dp_actual = st.number_input(
-            "Noel's actual total payment (EUR)", min_value=0.0, step=10.0, key="dp_actual"
-        )
-
-    dp_debt_reduction = round(dp_actual - budget_share, 2)
-    st.info(
-        f"Debt reduction this month: **EUR {dp_debt_reduction:.2f}** "
-        f"\u00a0(actual {dp_actual:.2f} \u2212 budget share {budget_share:.2f})"
-    )
-
-    if st.button("Save payment", disabled=(dp_month_key is None), type="primary", key="save_debt"):
-        upsert_debt_payment(
-            db_path,
-            dp_month_key,
-            budget_share if has_budget_record else None,
-            dp_actual,
-            dp_debt_reduction,
-        )
-        st.toast(f"Saved debt payment for {dp_month_key}.")
-        st.rerun()
-
-    if not debt_df.empty:
-        st.markdown("### Balance over time")
-        _debt_plot = debt_df.copy()
-        _debt_plot["month_dt"] = pd.to_datetime(_debt_plot["month"], format="%Y-%m", errors="coerce")
-        _debt_plot = _debt_plot.sort_values("month_dt")
-        _bal_fig = px.line(
-            _debt_plot,
-            x="month_dt",
-            y="balance",
-            markers=True,
-            labels={"balance": "Balance (EUR)", "month_dt": "Month"},
-        )
-        st.plotly_chart(_bal_fig, use_container_width=True)
-
-        st.markdown("### Payment history")
-        _hist = (
-            debt_df[["month", "noel_budget_share", "noel_actual_payment", "debt_payment", "balance"]]
-            .copy()
-            .sort_values("month", ascending=False)
-            .reset_index(drop=True)
-            .rename(
-                columns={
-                    "month": "Month",
-                    "noel_budget_share": "Budget share",
-                    "noel_actual_payment": "Actual payment",
-                    "debt_payment": "Debt reduction",
-                    "balance": "Balance",
-                }
-            )
-        )
-        st.dataframe(_hist, use_container_width=True)
