@@ -47,6 +47,27 @@ EXPENSE_LABELS: Dict[str, str] = {
     "jobrad": "JobRad (Noel)",
 }
 
+VARIABLE_COST_CATEGORIES: Dict[str, str] = {
+    "living": "Living",
+    "food_dining": "Food and dining",
+    "health_selfcare": "Health and self-care",
+    "clothes_shoes": "Clothes and shoes",
+    "communication_media": "Communication and media",
+    "leisure_hobbies": "Leisure and hobbies",
+    "education": "Education",
+    "car": "Car",
+    "public_transport": "Public transport and taxi",
+    "holidays_travel": "Holidays and travel",
+    "alimony_pocket": "Alimony and pocket money",
+    "online_shops": "Online shops",
+    "savings_investments": "Savings and investments",
+    "taxes": "Taxes",
+    "transactions_fees": "Transactions and fees",
+    "other": "Other",
+}
+
+VARIABLE_COST_KEYS: list = list(VARIABLE_COST_CATEGORIES.keys())
+
 
 def _safe(value: float) -> float:
     return round(max(0.0, float(value)), 2)

@@ -179,4 +179,57 @@ def load_debt_payments(db_path: Path) -> pd.DataFrame:
             "SELECT * FROM debt_payments ORDER BY month ASC",
             conn,
         )
+
+
+# ---------------------------------------------------------------------------
+# Variable costs
+# ---------------------------------------------------------------------------
+
+
+def init_variable_costs_table(db_path: Path) -> None:
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS variable_costs (
+                month TEXT NOT NULL,
+                category TEXT NOT NULL,
+                noel_amount REAL NOT NULL DEFAULT 0.0,
+                valentina_amount REAL NOT NULL DEFAULT 0.0,
+                joint_amount REAL NOT NULL DEFAULT 0.0,
+                PRIMARY KEY (month, category)
+            )
+            """
+        )
+
+
+def upsert_variable_costs(db_path: Path, month: str, vc_data: dict) -> None:
+    """vc_data: {category_key: {"noel": float, "valentina": float, "joint": float}}"""
+    with _connect(db_path) as conn:
+        for category, amounts in vc_data.items():
+            conn.execute(
+                """
+                INSERT INTO variable_costs (month, category, noel_amount, valentina_amount, joint_amount)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(month, category) DO UPDATE SET
+                    noel_amount      = excluded.noel_amount,
+                    valentina_amount = excluded.valentina_amount,
+                    joint_amount     = excluded.joint_amount
+                """,
+                (
+                    month,
+                    category,
+                    float(amounts.get("noel", 0.0)),
+                    float(amounts.get("valentina", 0.0)),
+                    float(amounts.get("joint", 0.0)),
+                ),
+            )
+
+
+def load_variable_costs(db_path: Path, month: str) -> pd.DataFrame:
+    with _connect(db_path) as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM variable_costs WHERE month = ?",
+            conn,
+            params=[month],
+        )
     return df

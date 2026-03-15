@@ -8,7 +8,13 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from finance_logic import EXPENSE_CATEGORIES, EXPENSE_LABELS, compute_summary
+from finance_logic import (
+    EXPENSE_CATEGORIES,
+    EXPENSE_LABELS,
+    VARIABLE_COST_CATEGORIES,
+    VARIABLE_COST_KEYS,
+    compute_summary,
+)
 from storage import (
     init_db,
     load_all_months,
@@ -17,6 +23,9 @@ from storage import (
     init_debt_table,
     upsert_debt_payment,
     load_debt_payments,
+    init_variable_costs_table,
+    upsert_variable_costs,
+    load_variable_costs,
     DEBT_OPENING_BALANCE,
 )
 
@@ -28,6 +37,7 @@ st.caption("Track monthly income, fixed expenses, and settlement amounts.")
 base_dir = Path(__file__).parent.resolve()
 db_path = init_db(base_dir)
 init_debt_table(db_path)
+init_variable_costs_table(db_path)
 
 EXPENSE_FIELDS = [
     "car_lease",
@@ -70,6 +80,9 @@ def _set_form_defaults() -> None:
     }
     for key in EXPENSE_FIELDS:
         defaults[f"expense_{key}"] = 0.0
+    for vc_key in VARIABLE_COST_KEYS:
+        for person in ("noel", "valentina", "joint"):
+            defaults[f"vc_{vc_key}_{person}"] = 0.0
 
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -123,7 +136,7 @@ def _build_record_from_inputs(month: str, payload: dict[str, object], expenses: 
     }
 
 
-def _apply_month_to_session(row: "pd.Series") -> None:
+def _apply_month_to_session(row: "pd.Series", month_key: str | None = None) -> None:
     st.session_state["noel_net_salary"] = _to_float(row.get("noel_net_salary", 0.0))
     st.session_state["noel_extra_income"] = _to_float(row.get("noel_extra_income", 0.0))
     st.session_state["valentina_net_salary"] = _to_float(row.get("valentina_net_salary", 0.0))
@@ -135,6 +148,18 @@ def _apply_month_to_session(row: "pd.Series") -> None:
     )
     for key in EXPENSE_FIELDS:
         st.session_state[f"expense_{key}"] = _to_float(row.get(key, 0.0))
+    # Reset all variable cost fields to zero before loading saved values.
+    for vc_key in VARIABLE_COST_KEYS:
+        for person in ("noel", "valentina", "joint"):
+            st.session_state[f"vc_{vc_key}_{person}"] = 0.0
+    if month_key:
+        vc_df = load_variable_costs(db_path, month_key)
+        for _, vc_row in vc_df.iterrows():
+            cat = str(vc_row["category"])
+            if cat in VARIABLE_COST_KEYS:
+                st.session_state[f"vc_{cat}_noel"] = _to_float(vc_row.get("noel_amount", 0.0))
+                st.session_state[f"vc_{cat}_valentina"] = _to_float(vc_row.get("valentina_amount", 0.0))
+                st.session_state[f"vc_{cat}_joint"] = _to_float(vc_row.get("joint_amount", 0.0))
 
 
 _set_form_defaults()
@@ -159,7 +184,7 @@ with st.sidebar:
             if loaded.empty:
                 st.warning(f"No record found for {month_key}.")
             else:
-                _apply_month_to_session(loaded.iloc[0])
+                _apply_month_to_session(loaded.iloc[0], month_key)
                 st.success(f"Loaded month {month_key} into form fields.")
                 st.rerun()
 
@@ -173,8 +198,8 @@ with st.sidebar:
             st.text(_m)
 
 
-tab_income, tab_expenses, tab_summary, tab_history, tab_debt = st.tabs(
-    ["Monthly income", "Fixed monthly expenses", "Monthly summary", "History & charts", "Debt tracker"]
+tab_income, tab_expenses, tab_variable_costs, tab_summary, tab_history, tab_debt = st.tabs(
+    ["Monthly income", "Fixed monthly expenses", "Variable costs", "Monthly summary", "History & charts", "Debt tracker"]
 )
 
 with tab_income:
@@ -226,6 +251,31 @@ with tab_expenses:
                     key=f"expense_{key}",
                 )
 
+with tab_variable_costs:
+    st.subheader("Variable costs")
+    st.caption(
+        "Track personal and household variable expenses by category. "
+        "These are for your own records only and do not affect the shared expense split."
+    )
+
+    vc_grand_total = 0.0
+    for vc_key, vc_label in VARIABLE_COST_CATEGORIES.items():
+        vc_noel = st.session_state.get(f"vc_{vc_key}_noel", 0.0)
+        vc_valentina = st.session_state.get(f"vc_{vc_key}_valentina", 0.0)
+        vc_joint = st.session_state.get(f"vc_{vc_key}_joint", 0.0)
+        vc_cat_total = vc_noel + vc_valentina + vc_joint
+        vc_grand_total += vc_cat_total
+        with st.expander(f"{vc_label} — EUR {vc_cat_total:.2f}", expanded=False):
+            vc_col1, vc_col2, vc_col3 = st.columns(3)
+            with vc_col1:
+                st.number_input("Noel", min_value=0.0, step=10.0, key=f"vc_{vc_key}_noel")
+            with vc_col2:
+                st.number_input("Valentina", min_value=0.0, step=10.0, key=f"vc_{vc_key}_valentina")
+            with vc_col3:
+                st.number_input("Joint", min_value=0.0, step=10.0, key=f"vc_{vc_key}_joint")
+
+    st.metric("Total variable costs", f"EUR {vc_grand_total:.2f}")
+
 payload = {
     "noel_net_salary": noel_net_salary,
     "noel_extra_income": noel_extra_income,
@@ -264,8 +314,48 @@ with tab_summary:
         else:
             record = _build_record_from_inputs(month_key, payload, expenses)
             upsert_month(db_path, record)
+            vc_data = {
+                vc_key: {
+                    "noel": st.session_state.get(f"vc_{vc_key}_noel", 0.0),
+                    "valentina": st.session_state.get(f"vc_{vc_key}_valentina", 0.0),
+                    "joint": st.session_state.get(f"vc_{vc_key}_joint", 0.0),
+                }
+                for vc_key in VARIABLE_COST_KEYS
+            }
+            upsert_variable_costs(db_path, month_key, vc_data)
             st.toast(f"Saved {month_key}.")
             st.rerun()
+
+    st.markdown("### Monthly expense distribution")
+    # Fixed expense categories
+    pie_labels: list[str] = []
+    pie_values: list[float] = []
+    for category, keys in EXPENSE_CATEGORIES.items():
+        cat_total = float(sum(expenses.get(k, 0.0) for k in keys))
+        if cat_total > 0:
+            pie_labels.append(category)
+            pie_values.append(cat_total)
+    # Variable cost categories
+    for vc_key, vc_label in VARIABLE_COST_CATEGORIES.items():
+        vc_total = (
+            st.session_state.get(f"vc_{vc_key}_noel", 0.0)
+            + st.session_state.get(f"vc_{vc_key}_valentina", 0.0)
+            + st.session_state.get(f"vc_{vc_key}_joint", 0.0)
+        )
+        if vc_total > 0:
+            pie_labels.append(vc_label)
+            pie_values.append(float(vc_total))
+    if pie_values:
+        summary_pie_df = pd.DataFrame({"Category": pie_labels, "Amount": pie_values})
+        summary_pie_fig = px.pie(
+            summary_pie_df,
+            values="Amount",
+            names="Category",
+            title="Fixed + variable expenses this month",
+        )
+        st.plotly_chart(summary_pie_fig, use_container_width=True)
+    else:
+        st.caption("Enter expenses above to see the distribution chart.")
 
 with tab_history:
     st.subheader("Historical view")
